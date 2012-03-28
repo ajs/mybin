@@ -1,0 +1,112 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+my %ops = (
+	   '+' => sub { $_[0] + $_[1] },
+	   '-' => sub { $_[0] - $_[1] },
+	   '*' => sub { $_[0] * $_[1] },
+	   '/' => sub { $_[0] / $_[1] });
+my @interesting = (1..195);
+
+my @ans;
+my $levels = 9;   # How many numbers to combine
+# $ans[1] = [9,-9]; # The starting values
+$ans[1] = [9];    # The starting values (no unary -)
+my $MAX=250;      # We expect the answer to be smaller than this
+my @solutions=(); # The solution set with details
+my %sol=();       # The hash for quick access to unique solutions
+
+$|=1;
+for (my $i=2;$i<=$levels;$i++) {
+  print "Level $i\n";
+  for(my $j=1;$j<$i;$j++) {
+    print ".";
+    # Optimization: Look ma, no recursion!
+    foreach my $lhs (@{$ans[$j]}) {
+      foreach my $rhs (@{$ans[$i-$j]}) {
+	# Optimization: only try one isomorphism of each tree for + and *
+	my @ops = $j>$i/2 ? qw(- /) : qw(+ - * /);
+	foreach my $op (@ops) {
+	  my $value = eval { $ops{$op}->($lhs,$rhs) };
+	  next if $@;
+	  if ($i == $levels) {
+	    next unless $value == int($value) && $value > 0 && $value < $MAX;
+	    $sol{int($value)} = 1;
+	  } else {
+	    # print "$lhs $op $rhs = $value\n" if $value == 90 && $i == 3;
+	    push @{$ans[$i]}, $value;
+	  }
+	}
+      }
+    }
+  }
+  print "\n";
+  # Optimization: throw away dups. Answer should be the same, but MUCH faster!
+  if ($i != $levels) {
+    my $tmp = $ans[$i];
+    my %x; @x{@$tmp}=@$tmp; @$tmp = values %x;
+  }
+}
+
+foreach my $n (@interesting) {
+  my $tree = reverse_eng($n,$levels);
+  if (defined $tree) {
+    print("$n = ", format_eq($tree), "\n");
+  } else {
+    print "No equation for $n\n";
+  }
+}
+
+undef @ans;
+print "\n";
+
+my @doable;
+$doable[$_]++ foreach sort {$a<=>$b} keys %sol;
+
+for(my $i=1;$i<$MAX;$i++) {
+  print("$i cannot be achieved with $levels 9s\n"),last unless exists $doable[$i];
+}
+exit(0);
+
+sub reverse_eng {
+  my $n = shift;
+  my $depth = shift;
+
+  if ($depth == 1) {
+    if (grep {$_ == $n} @{$ans[1]}) {
+      return $n;
+    } else {
+      warn $n;
+      return undef;
+    }
+  }
+  
+  for(my $j=1;$j<$depth;$j++) {
+    foreach my $lhs (@{$ans[$j]}) {
+      my $k = $depth-$j;
+      foreach my $rhs (@{$ans[$k]}) {
+	# Optimization: only try one isomorphism of each tree for + and *
+	my @ops = $j>$depth/2 ? qw(- /) : qw(+ - * /);
+	foreach my $op (@ops) {
+	  my $value = eval { $ops{$op}->($lhs,$rhs) };
+	  next if $@;
+	  if ($value == $n) {
+	    return [ $lhs, $rhs, $op ] if $depth == 2;
+	    my $sublhs = reverse_eng($lhs,$j);
+	    my $subrhs = reverse_eng($rhs,$k);
+	    # print "At $depth: $lhs $op $rhs = $n\n";
+	    return [$sublhs,$subrhs,$op] if defined $subrhs;
+	  }
+	}
+      }
+    }
+  }
+  return undef;
+}
+
+sub format_eq {
+  my $t = shift;
+  return $t unless ref $t;
+  return sprintf "(%s %s %s)", format_eq($t->[0]), $t->[2], format_eq($t->[1]);
+}
