@@ -1,0 +1,226 @@
+#!/usr/bin/perl
+#
+# anagrammer - a simple anagram generator
+#
+# $Id: anagrammer 172 2006-08-10 04:10:09Z ajs $
+
+use Getopt::Long;
+use Pod::Usage;
+use List::Util qw(max);
+use strict;
+
+our @required;
+our $max_words;
+our $natural_max;
+our $printed = 0;
+our $solutions = 0;
+our $verbose = 0;
+our $debug = 0;
+our $leave_orig = 0;
+our $min_word_len;
+GetOptions('r|require=s' => \@required,
+	   'm|max-words=i' => \$max_words,
+	   'n|natural-max' => \$natural_max,
+	   'w|minimum-length=i' => \$min_word_len,
+	   's|solutions=i' => \$solutions,
+	   'o|original-words' => \$leave_orig,
+	   'd|debug' => sub { $verbose = $debug = 1; },
+	   'v|verbose' => \$verbose,
+	   'h|help' => sub {pod2usage(-verbose=>1)},
+	   'man' => sub {pod2usage(-verbose=>2)}
+    ) or pod2usage(-verbose=>0);
+my $wordlist = shift @ARGV   or pod2usage(-verbose=>1,
+					  -message=>"Wordlist required");
+my $phrase = join " ", @ARGV or pod2usage(-verbose=>1,
+					  -message=>"Input phrase rquired");
+our @words; # wordlist
+our %wordindex; # mapping of word to @words index
+our %wordbuckets; # mapping of word to permunations list
+my %let; # Mapping of letter to count of how many are in target
+
+get_wordlist(\%let,$wordlist,$phrase);
+anagram_next(0,\%let,@required);
+exit(0);
+
+# Populates global @words, %wordindex and %wordbuckets
+sub get_wordlist {
+	my $let = shift;
+	my $wordlist = shift;
+	my $phrase = shift;
+	open(my $wl, "<", $wordlist) or die "Cannot open '$wordlist': $!\n";
+	@words = sort {length($b) <=> length($a)}
+	 	grep {!$min_word_len || length($_) >= $min_word_len}
+	 	grep {/^[a-z\-]{2,}\s*$/}
+	 	<$wl>, "a", "i";
+	close $wl;
+	chomp @words;
+	my $owordcount = @words; # How many did we start with?
+
+	my $letters = 0;
+	# Build the key that tells us how many of each letter is needed
+	$let->{lc $1}++,$letters++ while $phrase =~ /([a-z])/ig;
+	my %owords;
+	@owords{ map {lc $_} ($phrase=~/\b([a-z]+)\b/ig) } = ();
+	$max_words = max(2,int log($letters)) if $natural_max;
+	# If we limit the number of words, then the way we memoize
+	# requires that we do the short words first.
+	@words = sort {length($a) <=> length($b)} @words if $max_words;
+
+	my $word_pattern = join "", map {$_ . "{0,$let->{$_}}"} sort keys %$let;
+	@words = grep {!exists $owords{$_}} @words unless $leave_orig;
+	@words = grep {length($_) <= $letters}
+	 	grep {join("",sort split //, $_) =~ /^$word_pattern$/}
+	 	@words;
+	my $i = 0;
+	my $wordcount = @words; # New length
+	print STDERR "Reduced wordlist from $owordcount to $wordcount\n" if $verbose;
+	{
+		my @tmpwords;
+		foreach my $word (@words) {
+			my $wordparts = join('',sort split //, $word);
+			unless ($wordbuckets{$wordparts}) {
+				push @tmpwords, $wordparts;
+			}
+			push @{$wordbuckets{$wordparts}}, $word;
+		}
+		@words = @tmpwords;
+	}
+	$wordcount = @words;
+	print STDERR "Further reduced to $wordcount unique words\n" if $verbose;
+	# Map each word to its index in @words
+	$wordindex{$_} = $i++ foreach @words;
+
+	if (@required) {
+		foreach my $rword (@required) {
+			foreach my $rlet (grep {/[a-z]/i} split //, $rword) {	
+				if (--$let->{lc($rlet)} < 0) {
+					die "Cannot require $rword in given phrase\n";
+				}
+			}
+		}
+	}
+}
+
+sub anagram_next {
+	my $wi=shift;
+	my $l = shift;
+	my $done = shift;
+	$done = {} unless defined $done;
+	my @solutions;
+	my $ind;
+
+	# Find the sub-set of all words in the list that are "left"
+	my $set = join '', map {$l->{$_} ? "$_\{0,$l->{$_}\}" : ()} sort keys %$l;
+	$set = qr{^$set$};
+	# Note that we only consider $words[$wi] and higher. That avoids
+	# considering "a b" and "b a". We just want the combinations,
+	# not the permutations.
+	my @tmpwords = grep {$_ =~ /$set/} @words[$wi..$#words];
+	if ($debug) {
+		$ind = " " x @_;
+		print STDERR "${ind}No words fit /$set/\n" if @tmpwords == 0;
+	}
+	WORD:
+	foreach my $word (@tmpwords) {
+		my %t = %$l;
+		foreach my $ll (grep {/[a-z]/} split //, $word) {
+			next WORD if --$t{$ll} < 0;
+		}
+		if ($debug) {
+			my $fix = sub {map {$wordbuckets{$_}[0]} @_};
+			my $w;
+			if (@tmpwords > 5) {
+				$w = join ', ', $fix->(@tmpwords[0..2]), '...', $fix->(@tmpwords[-2,-1]);
+			} else {
+				$w = join ', ', $fix->(@tmpwords);
+			}
+			print STDERR "${ind}Working on '", join(" ", $fix->(@_,$word)), "' from ($w)\n";
+		} elsif ($verbose) {
+			print STDERR "Working on first word: $wordbuckets{$word}[0]\n" if @_ == 0;
+		}
+		my $left = join '', map {$_ x $t{$_}} grep {$t{$_}} keys %t;
+		if ($left && defined($done->{$left})) {
+			print STDERR "${ind}Punt at '$left'\n" if $debug;
+			if (@{$done->{$left}}) {
+				foreach my $product (@{$done->{$left}}) {
+					my $s = [$word,@$product];
+					push @solutions, $s;
+					print STDERR "${ind}Answer block:\n" if $debug;
+					winner(@_,@$s) if !$max_words || @_+@$s <= $max_words;
+				}
+			}
+			next WORD;
+		}
+		my $more = length($left);
+		if ($more && $max_words && @_+1 >= $max_words) {
+			next WORD; # too many words in this solution so far
+		} elsif ($more) {
+			# There are letters left, recurse
+			my $start = $wordindex{$word};
+			push @solutions, map {[$word,@$_]} (@{$done->{$left}} = anagram_next($start,\%t,$done,@_,$word));
+			print STDERR "${ind}Stored solutions for '$left'\n" if $debug;
+		} else {
+			# No letters left, print solution
+			push @solutions, [$word];
+			print STDERR "${ind}Answer block:\n" if $debug;
+			winner(@_,$word);
+		}
+	}
+	return @solutions;
+}
+
+sub winner {
+	my @win = map {$wordbuckets{$_}} @_;
+	my @ind = map {0} @win;
+	OUTER_WINNER: while(1) {
+		print join(" ", map {$win[$_][$ind[$_]]} 0..$#ind), "\n";
+		if ($solutions) {
+			exit 0 if ++$printed == $solutions;
+		}
+		for(my $i=0;$i<@ind;$i++) {
+			if (++$ind[$i] >= @{$win[$i]}) {
+				last OUTER_WINNER if $i == $#ind;
+				$ind[$i] = 0;
+			} else {
+				last;
+			}
+		}
+	}
+}
+
+__END__
+
+=head1 NAME
+
+anagrammer - Generate a list of anagrams for a given word
+
+=head1 SYNOPSIS
+
+ anagrammer [options] <wordlist> <phrase>
+
+ Options:
+	-r|--requires <word>	Solutions must condain word
+	-m|--max-words <n>	No more than n words in solutions
+	-n|--natural-max	Heuristic: same as -m, but chooses an n
+	-w|--minimum-length <n>	Words in solution must be at least n long
+	-s|--solutions <n>	Stop after n solutions
+	-o|--original-words	Allow the input words in solutions
+	-d|--debug		HUGE amounts of debugging
+	-v|--verbose		Status information as it runs
+	-h|--help		Help
+	--man			Full manual
+
+=head1 DESCRIPTION
+
+B<anagrammer> takes a wordlist and a phrase and returns all
+of the phrases that contain the same letters as the input phrase.
+Only lower-case words in the wordlist are considered, and
+the input phrase is converted to lowercase for comparison.
+
+=head1 AUTHOR
+
+Written in 2006 (c) by Aaron Sherman
+
+Distributed under the same terms as Perl itself.
+
+=cut
