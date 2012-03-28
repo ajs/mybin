@@ -1,0 +1,24 @@
+
+=head1 WHAT
+
+This is my personal bin directory, and may contain scripts and programs that
+are not generally useful. However, it's here to be used, so have at it.
+
+=head1 LICENSE
+
+Everything here, unless otherwise noted, is shared under the terms
+of either the GNU General Public License version 2 or Perl's Artistic
+License. You may choose which of these licensing terms you wish to comply
+with. You are not required to comply with more than 1 set of licensing
+terms.
+
+=head1 AUTHOR
+
+All scripts are, unless otherwise noted, written by Aaron Sherman,
+and are copyright 2001, 2008 and 2012.
+
+=head1 WARANTEE
+
+No Warantee is expressed or implied and all that jazz. If you want a warantee
+you'll have to find someone who cares.
+

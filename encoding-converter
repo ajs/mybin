@@ -1,0 +1,19 @@
+#!/usr/bin/perl -pl
+
+# This script really doesn't do any work on its own. It's just
+# a wrapper for Perl's native IO encoding conversion.
+
+# Usage example:
+#
+#  encoding-converter Latin1 UTF-8 some-latin1-file.txt > utf8-version.txt
+
+use strict;
+
+BEGIN{
+	if (@ARGV < 2) {
+		die "Usage: $0 <input-encoding> <output-encoding> [ <file> ...]\n";
+	}
+	my($mode_in, $mode_out) = (shift(@ARGV),shift(@ARGV));
+	binmode STDIN, ":encoding($mode_in)" or die "STDIN encoding: $!";
+	binmode STDOUT, ":encoding($mode_out)" or die "STDOUT encoding: $!"
+}
